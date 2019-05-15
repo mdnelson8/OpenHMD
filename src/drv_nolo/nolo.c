@@ -18,6 +18,8 @@
 #include "nolo.h"
 #include "../hid.h"
 
+#define TICK_LEN (1.0f / 120000.0f) // 120 Hz ticks
+
 #define NOLO_ID					0x0483 //ST microcontroller
 #define NOLO_HMD				0x5750
 
@@ -27,6 +29,20 @@ static devices_t* nolo_devices;
 static drv_priv* drv_priv_get(ohmd_device* device)
 {
 	return (drv_priv*)device;
+}
+
+void accel_from_nolo_vec(const int16_t* smp, vec3f* out_vec)
+{
+	out_vec->x = (float)smp[0];
+	out_vec->y = (float)smp[1];
+	out_vec->z = -(float)smp[2];
+}
+
+void gyro_from_nolo_vec(const int16_t* smp, vec3f* out_vec)
+{
+	out_vec->x = (float)smp[0];
+	out_vec->y = (float)smp[1];
+	out_vec->z = -(float)smp[2];
 }
 
 static void update_device(ohmd_device* device)
@@ -69,7 +85,9 @@ static void update_device(ohmd_device* device)
 
 		// currently the only message type the hardware supports
 		switch (buffer[0]) {
-			case 0xa5:  // Controllers packet
+			case NOLO_LEGACY_CONTROLLER_TRACKER:
+				break;
+			case NOLO_CONTROLLER_TRACKER_MSG:
 			{
 				if (controller0)
 					nolo_decode_controller(controller0, buffer+1);
@@ -77,9 +95,25 @@ static void update_device(ohmd_device* device)
 					nolo_decode_controller(controller1, buffer+64-controllerLength);
 			break;
 			}
-			case 0xa6: // HMD packet
-				nolo_decode_hmd_marker(priv, buffer+0x15);
-				nolo_decode_base_station(priv, buffer+0x36);
+			case NOLO_LEGACY_HMD_TRACKER:
+				break;
+			case NOLO_HMD_TRACKER_MSG:
+				/*
+				for (int i = 0; i < size; i++)
+				{
+					if (i+1 < size)
+						printf("%02X:", buffer[i]);
+					else
+						printf("%02X", buffer[i]);
+				}
+				printf("\n");*/
+				nolo_decode_hmd_marker(priv, buffer);
+				//nolo_decode_base_station(priv, buffer);
+
+				vec3f mag = {{0.0f, 0.0f, 0.0f}};
+				accel_from_nolo_vec(priv->sample.accel, &priv->raw_gyro);
+				gyro_from_nolo_vec(priv->sample.gyro, &priv->raw_accel);
+				ofusion_update(&priv->sensor_fusion, TICK_LEN, &priv->raw_gyro, &priv->raw_accel, &mag);
 			break;
 			default:
 				LOGE("unknown message type: %u", buffer[0]);
@@ -97,7 +131,7 @@ static int getf(ohmd_device* device, ohmd_float_value type, float* out)
 	switch(type){
 
 	case OHMD_ROTATION_QUAT: {
-			*(quatf*)out = priv->base.rotation;
+			*(quatf*)out = priv->sensor_fusion.orient;
 			break;
 		}
 
@@ -264,6 +298,8 @@ static ohmd_device* open_device(ohmd_driver* driver, ohmd_device_desc* desc)
 	priv->base.close = close_device;
 	priv->base.getf = getf;
 
+	ofusion_init(&priv->sensor_fusion);
+
 	return &priv->base;
 
 cleanup:
@@ -281,7 +317,8 @@ static void get_device_list(ohmd_driver* driver, ohmd_device_list* list)
 	int id = 0;
 	while (cur_dev) {
 		if (wcscmp(cur_dev->manufacturer_string, L"LYRobotix")==0 &&
-			wcscmp(cur_dev->product_string, L"NOLO")==0) {
+			(wcscmp(cur_dev->product_string, L"NOLO")==0 || //Old Firmware
+			 wcscmp(cur_dev->product_string, L"NOLO HMD")==0)) { //New Firmware
 			ohmd_device_desc* desc = &list->devices[list->num_devices++];
 
 			strcpy(desc->driver, "OpenHMD NOLO VR CV1 driver");

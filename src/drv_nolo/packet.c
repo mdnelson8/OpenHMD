@@ -10,6 +10,29 @@
 
 #include <stdio.h>
 #include "nolo.h"
+#include <inttypes.h>
+
+inline static uint8_t read8(const unsigned char** buffer)
+{
+	uint8_t ret = **buffer;
+	*buffer += 1;
+	return ret;
+}
+
+inline static int16_t read16(const unsigned char** buffer)
+{
+	int16_t ret = **buffer | (*(*buffer + 1) << 8);
+	//printf("converting data: %" PRIu16 "\n", ret);
+	*buffer += 2;
+	return ret;
+}
+
+inline static uint32_t read32(const unsigned char** buffer)
+{
+	uint32_t ret = **buffer | (*(*buffer + 1) << 8) | (*(*buffer + 2) << 16) | (*(*buffer + 3) << 24);
+	*buffer += 4;
+	return ret;
+}
 
 #define DELTA 0x9e3779b9
 #define MX (((z>>5^y<<2) + (y>>3^z<<4)) ^ ((sum^y) + (key[(p&3)^e] ^ z)))
@@ -67,40 +90,33 @@ void nolo_decrypt_data(unsigned char* buf)
 void nolo_decode_position(const unsigned char* data, vec3f* pos)
 {
 	const double scale = 0.0001f;
+	//const double scale = 1;
 
-	pos->x = (scale * (int16_t)(data[0]<<8 | data[1]));
-	pos->y = (scale * (int16_t)(data[2]<<8 | data[3]));
-	pos->z = (scale *          (data[4]<<8 | data[5]));
+	//pos->x = (scale * (int16_t)(data[0]<<8 | data[1]));
+	//pos->y = (scale * (int16_t)(data[2]<<8 | data[3]));
+	//pos->z = (scale *          (data[4]<<8 | data[5]));
+
+	pos->x = scale*read16(&data);
+	pos->y = scale*read16(&data);
+	pos->z = scale*read16(&data);
 }
 
-void nolo_decode_orientation(const unsigned char* data, quatf* quat)
-{
-	double w,i,j,k, scale;
-	// CV1 order
-	w = (int16_t)(data[0]<<8 | data[1]);
-	i = (int16_t)(data[2]<<8 | data[3]);
-	j = (int16_t)(data[4]<<8 | data[5]);
-	k = (int16_t)(data[6]<<8 | data[7]);
-	// Normalize (unknown if scale is constant)
-	//scale = 1.0/sqrt(i*i+j*j+k*k+w*w);
-	// Turns out it is fixed point. But the android driver author
-	// either didn't know, or didn't trust it.
-	// Unknown if normalizing it helps
-	scale = 1.0 / 16384;
-	//std::cout << "Scale: " << scale << std::endl;
-	w *= scale;
-	i *= scale;
-	j *= scale;
-	k *= scale;
+void nolo_decode_orientation(const unsigned char* data, nolo_sample* smp)
+{		
+	// acceleration
+	for(int i = 0; i < 3; i++){
+		smp->accel[i] = read16(&data);
+	}
 
-	// Reorder
-	quat->w = w;
-	quat->x = i;
-	quat->y = k;
-	quat->z = -j;
+	data += 6;
+
+	// gyro
+	for(int i = 0; i < 3; i++){
+		smp->gyro[i] = read16(&data);
+	}
 }
 
-void nolo_decode_controller(drv_priv* priv, unsigned char* data)
+void nolo_decode_controller(drv_priv* priv, const unsigned char* data)
 {
 	uint8_t bit, buttonstate;
 
@@ -117,8 +133,8 @@ void nolo_decode_controller(drv_priv* priv, unsigned char* data)
 	vec3f position;
 	quatf orientation;
 
-	nolo_decode_position(data+3, &position);
-	nolo_decode_orientation(data+3+3*2, &orientation);
+	//nolo_decode_position(data+3, &position);
+	//nolo_decode_orientation(data+3+3*2, &orientation);
 
 	//Change button state
 	buttonstate = data[3+3*2+4*2];
@@ -132,33 +148,40 @@ void nolo_decode_controller(drv_priv* priv, unsigned char* data)
 	priv->base.rotation = orientation;
 }
 
-void nolo_decode_hmd_marker(drv_priv* priv, unsigned char* data)
+void nolo_decode_hmd_marker(drv_priv* priv, const unsigned char* data)
 {
-	if (data[0] != 2 || data[1] != 1) {
+	//if (data[0] != 2 || data[1] != 1) {
 		/* Happens with corrupt packages (mixed with controller data)
 		std::cout << "Nolo: Unknown headset marker"
 		  << " version " << (int)data[0] << " " << (int)data[1]
 		  << std::endl;
 		*/
 		// Unknown version
-		return;
-	}
+	//	return;
+	//}
 
 	vec3f homepos;
 	vec3f position;
-	quatf orientation;
+	quatf orientation;// = {.0, .0, .0, 1};
+	nolo_sample smp;
+	data += 25; //Skip header?
 
-	nolo_decode_position(data+3, &position);
-	nolo_decode_position(data+3+3*2, &homepos);
-	nolo_decode_orientation(data+3+2*3*2+1, &orientation);
+	nolo_decode_position(data, &position);
+	//data += 6; //position
+	//nolo_decode_position(data+3+3*2, &homepos);
+	data += 6;
+	nolo_decode_orientation(data, &smp);
 
 	// Tracker viewer kept using the home for head.
 	// Something wrong with how they handle the descriptors.
-	priv->base.position = position;
-	priv->base.rotation = orientation;
+	
+	priv->sample = smp;
+	//printf("accel: %i - %i - %i\n", priv->sample.accel[0], priv->sample.accel[1], priv->sample.accel[2]);
+	//priv->base.position = position;
+	//priv->base.rotation = orientation;
 }
 
-void nolo_decode_base_station(drv_priv* priv, unsigned char* data)
+void nolo_decode_base_station(drv_priv* priv, const unsigned char* data)
 {
 	// Unknown version
 	if (data[0] != 2 || data[1] != 1)
