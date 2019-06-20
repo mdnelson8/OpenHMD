@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 /*
  * OpenHMD - Free and Open Source API and drivers for immersive technology.
- * Original implementation by: Yann Vernier.
+ * Original reverse engineering of firmware <2.0 by: Yann Vernier.
+ * Implementation and Reverse engineering firmware >2.0 by: Joey Ferwerda
  */
 
 /* NOLO VR - Internal Interface */
@@ -20,7 +21,7 @@ typedef struct
 {
 	int16_t accel[3];
 	int16_t gyro[3];
-	uint32_t tick;
+	uint64_t tick;
 } nolo_sample;
 
 typedef struct {
@@ -41,8 +42,8 @@ typedef enum
 	NOLO_LEGACY_CONTROLLER_TRACKER = 165,
 	NOLO_LEGACY_HMD_TRACKER = 166,
 	//firmware > 2.0
-	NOLO_CONTROLLER_TRACKER_MSG = 16,
-	NOLO_HMD_TRACKER_MSG = 17,
+	NOLO_CONTROLLER_0_HMD_SMP1 = 16,
+	NOLO_CONTROLLER_1_HMD_SMP2 = 17,
 } nolo_irq_cmd;
 
 typedef struct{

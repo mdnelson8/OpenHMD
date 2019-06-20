@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 /*
  * OpenHMD - Free and Open Source API and drivers for immersive technology.
- * Original implementation by: Yann Vernier.
+ * Original reverse engineering of firmware <2.0 by: Yann Vernier.
+ * Implementation and Reverse engineering firmware >2.0 by: Joey Ferwerda
  */
 
 /* NOLO VR - Packet Decoding and Utilities */
@@ -22,7 +23,6 @@ inline static uint8_t read8(const unsigned char** buffer)
 inline static int16_t read16(const unsigned char** buffer)
 {
 	int16_t ret = **buffer | (*(*buffer + 1) << 8);
-	//printf("converting data: %" PRIu16 "\n", ret);
 	*buffer += 2;
 	return ret;
 }
@@ -90,11 +90,6 @@ void nolo_decrypt_data(unsigned char* buf)
 void nolo_decode_position(const unsigned char* data, vec3f* pos)
 {
 	const double scale = 0.0001f;
-	//const double scale = 1;
-
-	//pos->x = (scale * (int16_t)(data[0]<<8 | data[1]));
-	//pos->y = (scale * (int16_t)(data[2]<<8 | data[3]));
-	//pos->z = (scale *          (data[4]<<8 | data[5]));
 
 	pos->x = scale*read16(&data);
 	pos->y = scale*read16(&data);
@@ -116,69 +111,89 @@ void nolo_decode_orientation(const unsigned char* data, nolo_sample* smp)
 	}
 }
 
+void nolo_decode_controller_orientation(const unsigned char* data, nolo_sample* smp)
+{		
+	// gyro
+	for(int i = 0; i < 3; i++){
+		smp->gyro[i] = read16(&data);
+	}
+
+	// acceleration
+	for(int i = 0; i < 3; i++){
+		smp->accel[i] = read16(&data);
+	}
+}
+
+// Orientation for Firmware <2,0
+void nolo_decode_quat_orientation(const unsigned char* data, quatf* quat)
+{
+	double w,i,j,k, scale;
+	// CV1 order
+	w = (int16_t)(data[0]<<8 | data[1]);
+	i = (int16_t)(data[2]<<8 | data[3]);
+	j = (int16_t)(data[4]<<8 | data[5]);
+	k = (int16_t)(data[6]<<8 | data[7]);
+	// Normalize (unknown if scale is constant)
+	//scale = 1.0/sqrt(i*i+j*j+k*k+w*w);
+	// Turns out it is fixed point. But the android driver author
+	// either didn't know, or didn't trust it.
+	// Unknown if normalizing it helps
+	scale = 1.0 / 16384;
+	//std::cout << "Scale: " << scale << std::endl;
+	w *= scale;
+	i *= scale;
+	j *= scale;
+	k *= scale;
+
+	// Reorder
+	quat->w = w;
+	quat->x = i;
+	quat->y = k;
+	quat->z = -j;
+}
+
 void nolo_decode_controller(drv_priv* priv, const unsigned char* data)
 {
 	uint8_t bit, buttonstate;
 
-	if (data[0] != 2 || data[1] != 1) {
-	// Unknown version
-	/* Happens when controllers aren't on.
-	std::cout << "Nolo: Unknown controller "
-	  << " version " << (int)data[0] << " " << (int)data[1]
-	  << std::endl;
-	*/
-		return;
-	}
-
 	vec3f position;
 	quatf orientation;
+	nolo_sample smp;
 
-	//nolo_decode_position(data+3, &position);
-	//nolo_decode_orientation(data+3+3*2, &orientation);
+	data += 1; //skip header
+	nolo_decode_position(data, &position);
+	data += 6;
+	nolo_decode_controller_orientation(data, &smp);
 
 	//Change button state
-	buttonstate = data[3+3*2+4*2];
+	data += 12;
+	buttonstate = read8(&data);
 	for (bit=0; bit<6; bit++)
 		priv->controller_values[bit] = (buttonstate & 1<<bit ? 1 : 0);
 
-	priv->controller_values[6] = data[3+3*2+4*2+2]; //X Pad
-	priv->controller_values[7] = data[3+3*2+4*2+2+1]; //Y Pad
+	priv->controller_values[6] = read8(&data); //X Pad
+	priv->controller_values[7] = read8(&data); //Y Pad
 
+	priv->sample = smp; //Set sample for fusion
 	priv->base.position = position;
-	priv->base.rotation = orientation;
 }
 
 void nolo_decode_hmd_marker(drv_priv* priv, const unsigned char* data)
 {
-	//if (data[0] != 2 || data[1] != 1) {
-		/* Happens with corrupt packages (mixed with controller data)
-		std::cout << "Nolo: Unknown headset marker"
-		  << " version " << (int)data[0] << " " << (int)data[1]
-		  << std::endl;
-		*/
-		// Unknown version
-	//	return;
-	//}
-
 	vec3f homepos;
 	vec3f position;
-	quatf orientation;// = {.0, .0, .0, 1};
+	quatf orientation;
 	nolo_sample smp;
-	data += 25; //Skip header?
+	data += 25; //Skip data?
 
 	nolo_decode_position(data, &position);
-	//data += 6; //position
-	//nolo_decode_position(data+3+3*2, &homepos);
+	data += 6;
 	data += 6;
 	nolo_decode_orientation(data, &smp);
 
-	// Tracker viewer kept using the home for head.
-	// Something wrong with how they handle the descriptors.
 	
-	priv->sample = smp;
-	//printf("accel: %i - %i - %i\n", priv->sample.accel[0], priv->sample.accel[1], priv->sample.accel[2]);
-	//priv->base.position = position;
-	//priv->base.rotation = orientation;
+	priv->sample = smp; //Set sample for fusion
+	priv->base.position = position; //Apply position directly to the base object
 }
 
 void nolo_decode_base_station(drv_priv* priv, const unsigned char* data)
