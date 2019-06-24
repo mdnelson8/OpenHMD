@@ -440,21 +440,24 @@ static void get_device_list(ohmd_driver* driver, ohmd_device_list* list)
 			continue;
 
 		while (cur_dev) {
-			if(rd[i].iface == -1 || cur_dev->interface_number == rd[i].iface){
-				ohmd_device_desc* desc = &list->devices[list->num_devices++];
+			// This is needed because other companies (eg: VR-Tek) also use the Oculus DK1 USB ID
+			if (wcscmp(cur_dev->manufacturer_string, L"Oculus VR, Inc.")==0) {
+				if(rd[i].iface == -1 || cur_dev->interface_number == rd[i].iface) {
+					ohmd_device_desc* desc = &list->devices[list->num_devices++];
 
-				strcpy(desc->driver, "OpenHMD Rift Driver");
-				strcpy(desc->vendor, "Oculus VR, Inc.");
-				strcpy(desc->product, rd[i].name);
+					strcpy(desc->driver, "OpenHMD Rift Driver");
+					strcpy(desc->vendor, "Oculus VR, Inc.");
+					strcpy(desc->product, rd[i].name);
 
-				desc->revision = rd[i].rev;
-		
-				desc->device_class = OHMD_DEVICE_CLASS_HMD;
-				desc->device_flags = OHMD_DEVICE_FLAGS_ROTATIONAL_TRACKING;
+					desc->revision = rd[i].rev;
 
-				strcpy(desc->path, cur_dev->path);
+					desc->device_class = OHMD_DEVICE_CLASS_HMD;
+					desc->device_flags = OHMD_DEVICE_FLAGS_ROTATIONAL_TRACKING;
 
-				desc->driver_ptr = driver;
+					strcpy(desc->path, cur_dev->path);
+
+					desc->driver_ptr = driver;
+				}
 			}
 
 			cur_dev = cur_dev->next;

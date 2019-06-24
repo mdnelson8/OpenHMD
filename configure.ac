@@ -111,6 +111,15 @@ AC_ARG_ENABLE([driver-xgvr],
 
 AM_CONDITIONAL([BUILD_DRIVER_XGVR], [test "x$driver_xgvr_enabled" != "xno"])
 
+# VR-Tek HMD driver
+AC_ARG_ENABLE([driver-vrtek],
+        [AS_HELP_STRING([--disable-driver-vrtek],
+                [disable building of vr-tek driver [default=yes]])],
+        [driver_vrtek_enabled=$enableval],
+        [driver_vrtek_enabled='yes'])
+
+AM_CONDITIONAL([BUILD_DRIVER_VRTEK], [test "x$driver_vrtek_enabled" != "xno"])
+
 # External Driver
 AC_ARG_ENABLE([driver-external],
         [AS_HELP_STRING([--disable-driver-external],
@@ -151,6 +160,10 @@ AS_IF([test "x$driver_nolo_enabled" != "xno"],
 
 # Libs required by 3Glasses HMD Driver
 AS_IF([test "x$driver_xgvr_enabled" != "xno"],
+        [PKG_CHECK_MODULES([hidapi], [$hidapi] >= 0.0.5)])
+
+# Libs required by VR-Tek HMD Driver
+AS_IF([test "x$driver_vrtek_enabled" != "xno"],
         [PKG_CHECK_MODULES([hidapi], [$hidapi] >= 0.0.5)])
 
 # Do we build OpenGL example?
