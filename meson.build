@@ -62,6 +62,10 @@ if get_option('default_library') == 'shared'
 	else
 		c_args += '-fvisibility=hidden'
 	endif
+else
+	if host_machine.system() == 'windows'
+		c_args += '-DOHMD_STATIC'
+	endif
 endif
 
 _drivers = get_option('drivers')
@@ -232,3 +236,34 @@ pkg.generate(
 	url: 'http://www.openhmd.net/',
 )
 install_headers('include/openhmd.h', subdir: 'openhmd')
+
+# Declare openhmd as a dependency so it can be used
+# as a meson subproject
+openhmd_dep = declare_dependency(
+  include_directories: include_directories('./include'),
+  link_with : openhmd_lib)
+
+#
+# Unit tests
+#
+
+if get_option('tests')
+	unittests_sources = [
+		'src/omath.c',
+		'tests/unittests/highlevel.c',
+		'tests/unittests/main.c',
+		'tests/unittests/quat.c',
+		'tests/unittests/tests.h',
+		'tests/unittests/vec.c'
+	]
+
+	unittests = executable(
+		'openhmd_unittests',
+		unittests_sources,
+		include_directories: include_directories('./include', './src'),
+		link_with: [openhmd_lib],
+		dependencies: [dep_libm, dep_threads]
+	)
+
+	test('unittests', unittests)
+endif
